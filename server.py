@@ -24,6 +24,11 @@ SERVER_PORT = int(os.getenv("SERVER_PORT", 8000))
 # Chromium options arguments
 arguments = [
     # "--remote-debugging-port=9222",  # Add this line for remote debugging
+    "headless",
+    "disable-infobars",
+    "-disable-extension",
+    "-disable-dev-shm-usage",
+    "-no-sandbox",
     "-no-first-run",
     "-force-color-profile=srgb",
     "-metrics-recording-only",
@@ -37,7 +42,8 @@ arguments = [
     "-deny-permission-prompts",
     "-disable-gpu",
     "-accept-lang=en-US",
-    #"-incognito" # You can add this line to open the browser in incognito mode by default 
+
+    #"-incognito" # You can add this line to open the browser in incognito mode by default
 ]
 
 browser_path = "/usr/bin/google-chrome"
@@ -55,10 +61,10 @@ def create_proxy_extension(username : str, password : str, endpoint : str, port 
     temp_dir = tempfile.gettempdir()
     unique_proxy_id = hashlib.sha256(f"{username}:{password}:{endpoint}:{port}".encode()).hexdigest()
     directory_name = os.path.join(temp_dir, unique_proxy_id)
-    
+
     if os.path.exists(directory_name):
         return directory_name
-    
+
     manifest_json = """
     {
         "version": "1.0.0",
@@ -119,10 +125,10 @@ def create_proxy_extension(username : str, password : str, endpoint : str, port 
 
     with open(manifest_path, "w") as file:
         file.write(manifest_json)
-    
+
     with open(background_path, "w") as file2:
         file2.write(background_js)
-    
+
     return directory_name
 
 # Function to check if the URL is safe
@@ -147,7 +153,7 @@ def bypass_cloudflare(url: str, retries: int, log: bool, proxy: str = None) -> C
         #options.set_argument("--remote-debugging-port=9222")
         options.set_argument("--no-sandbox") # Necessary for Docker
         options.set_argument("--disable-gpu") # Optional, helps in some cases
-    
+
     if proxy:
         try:
             parsed_proxy = urlparse(proxy)
@@ -193,13 +199,17 @@ def bypass_cloudflare(url: str, retries: int, log: bool, proxy: str = None) -> C
 # Endpoint to get cookies
 @app.get("/cookies", response_model=CookieResponse)
 async def get_cookies(url: str, retries: int = 5, proxy: str = None):
+    print(f"get_cookies: {url}")
     if not is_safe_url(url):
         raise HTTPException(status_code=400, detail="Invalid URL")
     try:
         driver = bypass_cloudflare(url, retries, log, proxy)
+        print("driver loaded")
         cookies = {cookie.get("name", ""): cookie.get("value", " ") for cookie in driver.cookies()}
+        print("got cookies")
         user_agent = driver.user_agent
         driver.quit()
+        print("driver quit()")
         return CookieResponse(cookies=cookies, user_agent=user_agent)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -208,16 +218,20 @@ async def get_cookies(url: str, retries: int = 5, proxy: str = None):
 # Endpoint to get HTML content and cookies
 @app.get("/html")
 async def get_html(url: str, retries: int = 5, proxy: str = None):
+    print(f"get_html: {url}")
     if not is_safe_url(url):
         raise HTTPException(status_code=400, detail="Invalid URL")
     try:
         driver = bypass_cloudflare(url, retries, log, proxy)
+        print("driver loaded")
         html = driver.html
         cookies_json = {cookie.get("name", ""): cookie.get("value", " ") for cookie in driver.cookies()}
+        print("got cookies")
         response = Response(content=html, media_type="text/html")
         response.headers["cookies"] = json.dumps(cookies_json)
         response.headers["user_agent"] = driver.user_agent
         driver.quit()
+        print("driver quit()")
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -232,16 +246,16 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     display = None
-    
+
     if args.headless or DOCKER_MODE:
         display = Display(visible=0, size=(1920, 1080))
         display.start()
-        
+
         def cleanup_display():
             if display:
                 display.stop()
         atexit.register(cleanup_display)
-    
+
     if args.nolog:
         log = False
     else:
